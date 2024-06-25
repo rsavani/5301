@@ -1,0 +1,89 @@
+---
+title: "NYC Shootings"
+author: "Reeva Savani"
+date: "2024-06-23"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup R environment}
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+```
+
+This data set lists every shooting incident that occurred in NYC from 2006 to 2023. Each record represents a separate incident, and includes details about the event, the location and time of the incident, and information related to the suspect and victim demographics. 
+
+```{r import data}
+data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+summary(data)
+```
+
+After reviewing the summary of the data, I will take a few steps to tidy the data before I begin my analysis. This includes reformatting the variables to appropriate data types, removing unnecessary columns, replacing null valuesand removing records with invalid data.
+
+```{r tidy data}
+data <- data %>% filter(VIC_AGE_GROUP != "1022" & !PERP_AGE_GROUP %in% c("1020", "1028", "224", "940")) 
+data <- data %>% replace(data == "(null)", NA)  %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+                        BORO = factor(BORO),
+                        PRECINCT = factor(PRECINCT),
+                        LOCATION_DESC = factor(LOCATION_DESC),
+                        PERP_AGE_GROUP = factor(PERP_AGE_GROUP),
+                        PERP_SEX = factor(PERP_SEX),
+                        PERP_RACE = factor(PERP_RACE),
+                        VIC_AGE_GROUP = factor(VIC_AGE_GROUP),
+                        VIC_SEX = factor(VIC_SEX),
+                        VIC_RACE = factor(VIC_RACE)) %>% select(-c(OCCUR_TIME, JURISDICTION_CODE, LOC_OF_OCCUR_DESC, LOC_CLASSFCTN_DESC, STATISTICAL_MURDER_FLAG, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat)) 
+summary(data)
+```
+
+Now that the data is clean, I can proceed with my analysis. Let's begin by looking at some trends in the data using visualizations.
+
+```{r visualizations}
+#summarize data by date
+data_by_date <- data %>% group_by(OCCUR_DATE) %>% summarize(incidents = n())
+#visualization
+data_by_date %>% ggplot(aes(x = OCCUR_DATE, y = incidents)) + geom_point(aes(color = "incidents"))
+```
+
+From the chart, we can see the majority of the data is clustered below 10 shooting incidents per day with outliers. The most notable outlier occuring in mid-2020, which was a tumultous time due to the global pandemic and public outrage following George Floyd's death. Headlines from the New York Times on this date reflect the reasons for a significant increase in shooting incidents. 
+
+Let's do another visualization to see if we can find any relationship between the perpetrator and the victim.
+
+```{r contingency visualization}
+mosaicplot(table(data$PERP_AGE_GROUP,data$VIC_AGE_GROUP), xlab="PERP", ylab="VIC", main="AGE_GROUP", las=2)
+mosaicplot(table(data$PERP_SEX,data$VIC_SEX), xlab="PERP", ylab="VIC", main="SEX", las=2)
+mosaicplot(table(data$PERP_RACE,data$VIC_RACE), xlab="PERP", ylab="VIC", main="RACE", las=2)
+```
+
+According to these charts, there appears to be some correlation between the known perpetrators and victims. Most shooting incidents appear to occur between two people who are both ages 25-44, male, and black. 
+
+To test these findings, I will create models to predict details about the prepetrator using this data. First, I will try to predict the age group of the perpetrator.
+```{r predictive models - age}
+#create model data - remove records with missing perp ages
+model_data <- data %>% filter(!is.na(PERP_AGE_GROUP))
+mod_age <- glm(PERP_AGE_GROUP ~ VIC_AGE_GROUP + VIC_RACE + VIC_SEX + BORO,family = binomial(link = "logit"), data=model_data)
+summary(mod_age)
+```
+
+When predicting perpetrator age, the victim's age seems to be most statistically significant. However, the model itself performs quite poorly as indicated by the residual deviance and AIC.
+
+Next, I will create a model to predict the perpetrator sex.
+
+```{r predictive models - sex}
+mod_sex <- glm(PERP_SEX ~ VIC_AGE_GROUP + VIC_RACE + VIC_SEX + BORO,family = binomial(link = "logit"), data=model_data)
+summary(mod_sex)
+```
+
+In the model for predicting perpetrator sex, every single predictor variable is labelled as statistically significant. Yet, this is the worst performing model. Lastly, I will attempt to predict perpetrator race.
+
+```{r predictive models - race}
+mod_race <- glm(PERP_RACE ~ VIC_AGE_GROUP + VIC_RACE + VIC_SEX + BORO,family = binomial(link = "logit"), data=model_data)
+summary(mod_race)
+```
+
+The last model, predicting perpetrator race, performs the best out of the three tried with the lowest residual deviance. However, upon closer examination at which predictor variables are the most statistically significant, it seems none of them are. Therefore, this model should not be considered to predict race.
+
+In conclusion, none of the models were successful in predicting attributes about the perpetrator based on victim details and location of the shooting incident. From the analysis of the data, we had seen clear relationships between the victim and the perpetrator, however the models suggest otherwise. Considering how skewed the data is, it may not be reflective of the population anyways and so wouldn't make for a useful model. Considering biases is crucial when handling such sensitive data. There are a number of reasons the data may appear the way it does that keep it from being 100% representative. This could be due to biased policing, resulting in a disproportionate number of arrests of a specific group of people. The data only contains information on perpetrators who were caught, and so that could have an effect on the skewness. Currently, the data tells one story which could have a clear conclusion, but an ethical data scientist is someone who not only analyzes the data but also how that data came to be. 
+
+
